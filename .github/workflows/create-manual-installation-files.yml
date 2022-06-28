@@ -1,0 +1,49 @@
+name: Create Manual Installation Files
+
+on: [pull_request]
+
+# on:
+#   release:
+#     types: [published]
+
+jobs:
+  create-manual-installation-files:
+    name: Create Manual Installation Files
+    runs-on: self-hosted
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Build Appwrite
+      # Upstream bug causes buildkit pulls to fail so prefetch base images
+      # https://github.com/moby/moby/issues/41864
+      run:  |
+        echo "_APP_FUNCTIONS_RUNTIMES=php-8.0" >> .env
+        docker pull composer:2.0
+        docker pull php:8.0-cli-alpine
+        docker compose build --progress=plain
+
+    - name: Install
+      run: |
+        docker run -it --rm \
+          --volume /var/run/docker.sock:/var/run/docker.sock \
+          --volume "$(pwd)"/build/appwrite:/usr/src/code/appwrite:rw \
+          --entrypoint="install" \
+          appwrite_appwrite \
+          --httpPort=80 \
+          --httpsPort=443 \
+          --interactive=N
+
+    - name: Upload to release
+      uses: fnkr/github-action-ghr@v1
+      env:
+        GHR_PATH: build/
+        GHR_REPLACE: false
+        GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+
+    - name: Teardown
+      if: always()
+      run: |
+        docker ps -aq | xargs docker rm --force || true
+        docker volume prune --force || true
+        docker network prune --force || true
